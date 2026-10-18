@@ -27,6 +27,19 @@ app.get('/tizentube/getState', (req, res) => {
     });
 });
 
+// Serves userScript.js that is bundled inside the .wgt (replaces the jsDelivr CDN).
+// Same origin as the proxied page (http://localhost:8099), so no CSP / CORS / mixed-content issue.
+app.get('/tizentube/userScript.js', (req, res) => {
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+        res.status(200).send(injector.readUserScript());
+    } catch (e) {
+        console.error('TizenTube: failed to load local userScript.js: ' + e.message);
+        res.status(500).send('alert(' + JSON.stringify('TizenTube: failed to load local userScript.js\n' + e.message) + ');');
+    }
+});
+
 app.get('/tizentube/debugger', (req, res) => {
     const args = req.originalUrl.split('?')[1] || '';
     const interval = setInterval(() => {
@@ -99,7 +112,7 @@ app.all('*', (req, res) => {
             for (const key in headerKeys) {
                 if (Object.prototype.hasOwnProperty.call(headerKeys, key)) {
                     const lowerKey = key.toLowerCase();
-                    const skipHeaders = ['content-encoding', 'content-length', 'transfer-encoding', 'content-security-policy', 'alt-svc'];
+                    const skipHeaders = ['content-encoding', 'content-length', 'transfer-encoding', 'content-security-policy', 'content-security-policy-report-only', 'x-content-security-policy', 'x-webkit-csp', 'alt-svc'];
                     if (isCorsBypass) skipHeaders.push('access-control-allow-origin');
 
                     if (skipHeaders.indexOf(lowerKey) !== -1) continue;
@@ -138,8 +151,13 @@ app.all('*', (req, res) => {
 
                 return response.text().then((text) => {
                     if (req.url.indexOf('/tv') === 0 && req.url.indexOf('/tv_config') === -1) {
-                        // Insert the userscript for TizenTube
-                        text += `<script src="https://cdn.jsdelivr.net/npm/@foxreis/tizentube/dist/userScript.js?ver=${Date.now()}"></script>`;
+                        // Insert the userscript for TizenTube (served locally from the .wgt)
+                        text += `<script src="http://localhost:${PORT}/tizentube/userScript.js?ver=${Date.now()}"></script>`;
+                    }
+
+                    // Drop CSP declared inside the HTML itself (the CSP *headers* are already skipped above)
+                    if (contentType.indexOf('text/html') !== -1) {
+                        text = text.replace(/<meta[^>]+http-equiv\s*=\s*["']?content-security-policy(?:-report-only)?["']?[^>]*>/gi, '');
                     }
 
                     const proxyPrefix = `http://localhost:${PORT}/cors-bypass/`;
